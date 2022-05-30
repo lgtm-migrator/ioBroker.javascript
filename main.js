@@ -1159,11 +1159,7 @@ function main() {
                 }
 
                 // find if someone wants that this instance makes the mirroring
-                adapter.getObjectView('system', 'instance', {
-                    starkey: 'system.adapter.javascript.',
-                    endkey: 'system.adapter.javascript.\u9999'
-                },
-                (err, list) => {
+                adapter.getObjectView('system', 'instance', null, (err, list) => {
                     // Do not allow to mirror into same directory with 2 different instances
                     const instances = list.rows.filter(obj => obj.id .startsWith('system.adapter.javascript.')).map(obj => obj.value);
                     const pos = instances.findIndex(obj =>
@@ -1191,14 +1187,26 @@ function main() {
                         } else {
                             const ioBDataDir = utils.getAbsoluteDefaultDataDir() + nodePath.sep;
                             const mirrorPath = nodePath.normalize(instances[pos].native.mirrorPath);
-                            let mirrorForbidden = false;
-                            for (let dir of forbiddenMirrorLocations) {
-                                dir = nodePath.join(ioBDataDir, dir) + nodePath.sep;
-                                if (dir.includes(mirrorPath) || mirrorPath.startsWith(dir)) {
-                                    adapter.log.error(`The Mirror directory is not allowed to be a central ioBroker directory!`);
-                                    adapter.log.error(`Directory ${mirrorPath} is not allowed to mirror files!`);
-                                    mirrorForbidden = true;
-                                    break;
+                            let mirrorForbidden = '';
+                            let rootDir = nodePath.normalize(__dirname + '/../..');
+                            let backUpDir = nodePath.normalize(__dirname + '/../../backup');
+                            if (process.platform === 'win32') {
+                                rootDir = rootDir.toLowerCase();
+                                backUpDir = backUpDir.toLowerCase();
+                            }
+
+                            if (mirrorPath === rootDir) {
+                                mirrorForbidden = rootDir;
+                            } else
+                            if (mirrorPath === backUpDir) {
+                                mirrorForbidden = backUpDir;
+                            } else {
+                                for (let dir of forbiddenMirrorLocations) {
+                                    dir = nodePath.join(ioBDataDir, dir) + nodePath.sep;
+                                    if (dir.includes(mirrorPath) || mirrorPath.startsWith(dir)) {
+                                        mirrorForbidden = mirrorPath;
+                                        break;
+                                    }
                                 }
                             }
                             if (!mirrorForbidden) {
@@ -1207,6 +1215,9 @@ function main() {
                                     log: adapter.log,
                                     diskRoot: mirrorPath
                                 });
+                            } else {
+                                adapter.log.error(`The Mirror directory is not allowed to be a central ioBroker directory!`);
+                                adapter.log.error(`Directory ${mirrorForbidden} is not allowed to mirror files!`);
                             }
                         }
                     }
