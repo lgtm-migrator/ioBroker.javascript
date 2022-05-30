@@ -1158,31 +1158,59 @@ function main() {
                     }
                 }
 
-                if (adapter.config.mirrorPath) {
-                    adapter.config.mirrorInstance = parseInt(adapter.config.mirrorInstance, 10) || 0;
-                    if (adapter.instance === adapter.config.mirrorInstance) {
-                        const ioBDataDir = utils.getAbsoluteDefaultDataDir() + nodePath.sep;
-                        adapter.config.mirrorPath = nodePath.normalize(adapter.config.mirrorPath);
-                        let mirrorForbidden = false;
-                        for (let dir of forbiddenMirrorLocations) {
-                            dir = nodePath.join(ioBDataDir, dir) + nodePath.sep;
-                            if (dir.includes(adapter.config.mirrorPath) || adapter.config.mirrorPath.startsWith(dir)) {
-                                adapter.log.error(`The Mirror directory is not allowed to be a central ioBroker directory!`);
-                                adapter.log.error(`Directory ${adapter.config.mirrorPath} is not allowed to mirror files!`);
-                                mirrorForbidden = true;
-                                break;
+                // find if someone wants that this instance makes the mirroring
+                adapter.getObjectView('system', 'instance', {
+                    starkey: 'system.adapter.javascript.',
+                    endkey: 'system.adapter.javascript.\u9999'
+                },
+                (err, list) => {
+                    // Do not allow to mirror into same directory with 2 different instances
+                    const instances = list.rows.filter(obj => obj.id .startsWith('system.adapter.javascript.')).map(obj => obj.value);
+                    const pos = instances.findIndex(obj =>
+                        obj.native &&
+                        obj.native.mirrorPath &&
+                        obj.common &&
+                        obj.common.enabled &&
+                        parseInt(obj.native.mirrorInstance, 10) === adapter.instance
+                    );
+
+                    if (pos !== -1) {
+                        // some adapter wants that THIS instance makes the mirroring
+                        // try to find other instance with the same path
+                        const posOther = instances.findIndex((obj, i) =>
+                            i !== pos && // if it is other entry
+                            obj.common.enabled &&
+                            instances[pos].native.mirrorPath === obj.native.mirrorPath && // and the same mirror path
+                            parseInt(obj.native.mirrorInstance, 10) !== adapter.instance); // and other than THIS instance
+
+                        if (posOther !== -1) {
+                            // invalid configuration
+                            adapter.log.error(`Found two instances that mirrors into same path: ${
+                                instances[pos]._id.replace('system.adapter.')} and ${
+                                instances[posOther]._id.replace('system.adapter.')}. Please disable one`);
+                        } else {
+                            const ioBDataDir = utils.getAbsoluteDefaultDataDir() + nodePath.sep;
+                            const mirrorPath = nodePath.normalize(instances[pos].native.mirrorPath);
+                            let mirrorForbidden = false;
+                            for (let dir of forbiddenMirrorLocations) {
+                                dir = nodePath.join(ioBDataDir, dir) + nodePath.sep;
+                                if (dir.includes(mirrorPath) || mirrorPath.startsWith(dir)) {
+                                    adapter.log.error(`The Mirror directory is not allowed to be a central ioBroker directory!`);
+                                    adapter.log.error(`Directory ${mirrorPath} is not allowed to mirror files!`);
+                                    mirrorForbidden = true;
+                                    break;
+                                }
+                            }
+                            if (!mirrorForbidden) {
+                                mirror = new Mirror({
+                                    adapter,
+                                    log: adapter.log,
+                                    diskRoot: mirrorPath
+                                });
                             }
                         }
-                        if (!mirrorForbidden) {
-                            mirror = new Mirror({
-                                adapter,
-                                log: adapter.log,
-                                diskRoot: adapter.config.mirrorPath
-                            });
-                        }
                     }
-                }
-
+                });
             });
         });
     });
